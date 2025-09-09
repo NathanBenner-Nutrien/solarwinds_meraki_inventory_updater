@@ -1,0 +1,13 @@
+---
+- name: Discover Meraki Devices in SolarWinds
+  hosts: cgydcditoc01.global.corp
+  tasks:
+  - name: Run the discovery script
+    script: main.py
+    args:
+      --npm_username:         "{{ npm_username }}"
+      --npm_password:         "{{ npm_password }}"
+      --npm_server:           "{{ npm_server }}"
+      --meraki_token:         "{{ meraki_token }}"
+      --meraki_device_models: MX
+      --mode:                 discover

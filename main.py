@@ -35,14 +35,14 @@ class MerakiInventory:
     self.merakiDevices = self.fetchMerakiDevices(models=args.meraki_device_models, productTypes=args.meraki_product_types)
     self.merakiNetworks = self.fetchMerakiNetworks()
     self.monitoredDevices = self.fetchMonitoredDevices()
+    self.deviceLocations = self.loadDeviceLocations()
+    self.unmonitoredDevices = []
 
     geopy.geocoders.options.default_user_agent = 'solarwinds_meraki_inventory'
     geopy.geocoders.options.default_timeout = 20
 
     self.geolocator = Nominatim()
     self.reverseLookup = partial(self.geolocator.reverse, language="en")
-    
-    self.deviceLocations = self.loadDeviceLocations()
 
   # Fetch Device List From Meraki Dashboard
   def fetchMerakiDevices(self, models, productTypes):
@@ -165,9 +165,10 @@ class MerakiInventory:
   # Update a node in SolarWinds
   def updateNode(self, device):
     try:
-      self.swis.update(device['uri'] + '/CustomProperties', Network=device['network'])
+      self.swis.update(device['uri'] + '/CustomProperties', Network=device['network']['name'])
     except Exception as e:
       print(e)
+      print(device['network'])
     try:
       self.swis.update(device['uri'] + '/CustomProperties', Country=device['country'])
     except Exception as e:
@@ -184,6 +185,7 @@ class MerakiInventory:
       self.swis.update(device['uri'] + '/CustomProperties', Serial=device['serial'])
     except Exception as e:
       print(e)
+      print(device['serial'])
 
   # Remove a node from SolarWinds
   def removeNode(self, uri):
@@ -209,8 +211,10 @@ class MerakiInventory:
           for vlan in vlans:
             if (re.match(ipPattern, vlan["applianceIp"])):
               return vlan["applianceIp"]
+          self.unmonitoredDevices.append({ **device, 'vlans': vlans })
       except:
-        print(f"ERROR : Device {device["name"]} does not have VLANs")
+        print(f"ERROR : Device {device['name']} does not have VLANs")
+        self.unmonitoredDevices.append(device)
       return ""
 
   def discoverDevices(self):
@@ -218,10 +222,6 @@ class MerakiInventory:
     
     # Add any devices that are not currently monitored
     for name, device in self.merakiDevices.items():
-      # Add only 10 devices at a time
-      # if (count > 1000):
-      #   break
-
       ip = self.fetchDeviceIP(device)
 
       # If the IP could not be found continue to the next device
@@ -232,15 +232,21 @@ class MerakiInventory:
       if (ip not in self.monitoredDevices):
         bulkList.append({'Address': ip})
       elif (self.monitoredDevices[ip]['ObjectSubType'] != 'SNMP'):
+        with open('icmp_device.txt', 'a') as icmpDevice:
+          icmpDevice.write(f"{device}")
         self.removeNode(self.monitoredDevices[ip]['Uri'])
         bulkList.append({'Address': ip})
       # else:
       #   print(self.monitoredDevices[ip])
 
+    for device in self.unmonitoredDevices:
+      with open('device_missing.txt', 'a') as missingIP:
+        missingIP.write(f"{device}")
+
     # TODO: Remove any devices that are currently monitored but have been decommissioned
-    for ip, device in self.monitoredDevices.items():
-      if (ip not in self.merakiDevices):
-        pass
+    # for ip, device in self.monitoredDevices.items():
+    #   if (ip not in self.merakiDevices):
+    #     pass
         # removeNode(swis, device)
 
     corePluginContext = {
@@ -294,7 +300,7 @@ class MerakiInventory:
       with open('locations.csv', newline='') as locationCsv:
         reader = csv.DictReader(locationCsv, delimiter=',', quotechar='|', fieldnames=fieldnames)
         for row in reader:
-          deviceLocations[row['ip']] = row
+          deviceLocations[row['serial']] = row
     except FileNotFoundError:
       return {}
     return deviceLocations
